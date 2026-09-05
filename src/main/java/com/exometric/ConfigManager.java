@@ -20,6 +20,10 @@ public class ConfigManager {
         public boolean api_enabled = true;
         public int api_port = 0; // 0 significa que o usuário precisa configurar
         public String api_token = "";
+
+        public boolean api_https_enabled = false;
+        public int api_https_port = 0; // 0 significa que o usuário precisa configurar
+        public String api_https_keystore_password = "";
         
         // Comentários simulados via campos se necessário, mas JSON padrão não suporta.
         // Vamos usar nomes de campos descritivos.
@@ -50,7 +54,12 @@ public class ConfigManager {
                 instance.api_token = generateSecureToken();
                 changed = true;
             }
-            
+
+            if (instance.api_https_keystore_password == null || instance.api_https_keystore_password.isEmpty()) {
+                instance.api_https_keystore_password = generateSecureToken();
+                changed = true;
+            }
+
             if (changed) save();
         } catch (Exception e) {
             e.printStackTrace();

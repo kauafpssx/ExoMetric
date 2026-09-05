@@ -24,6 +24,7 @@
 - **Player Data**: Detailed list including Name, UUID, Ping, Dimension, Gamemode, Health, Level, and Coordinates.
 - **Security**: Authentication via Query string token (`?token=...`).
 - **Auto-Reload (Hot-Swap)**: Change the token or port in the JSON file and the system restarts the API automatically without rebooting Minecraft.
+- **Optional HTTPS**: Serve the API over HTTPS on a second port using an auto-generated self-signed certificate.
 
 ## ⚙️ Configuration
 
@@ -34,8 +35,27 @@ The config file is located at `config/ExoMetric.json`:
 | `api_enabled` | Boolean | Enables/Disables the metrics server. |
 | `api_port` | Integer | HTTP Port (must be allocated/open on your host). |
 | `api_token` | String | Automatically generated access token (can be customized). |
+| `api_https_enabled` | Boolean | Enables/Disables the optional HTTPS listener. |
+| `api_https_port` | Integer | HTTPS Port (must be a **separate** allocation from `api_port` — HTTP and HTTPS cannot share one port). |
+| `api_https_keystore_password` | String | Automatically generated password for the self-signed keystore. Do not share. |
 
 > **Note:** The mod monitors this file. Any saved changes will be applied in real-time.
+
+### 🔒 Optional HTTPS
+
+The API can also listen over HTTPS on a second port. Since `HttpServer`/`HttpsServer` cannot share a single port for both protocols, you'll need a **second port allocation** from your host in addition to the one used for `api_port`.
+
+1. In `config/ExoMetric.json`, set:
+   ```json
+   "api_https_enabled": true,
+   "api_https_port": 25725
+   ```
+2. On the next start (or hot-reload), ExoMetric generates a self-signed PKCS12 keystore (`config/exometric-ssl.p12`) automatically using the `keytool` bundled with the server's JDK — no manual certificate setup needed.
+3. Access via `https://server-ip:https-port/mc-stats?token=YOUR_TOKEN`.
+
+> **Note:** Since the certificate is self-signed, browsers will show a security warning ("Your connection is not private"). This is expected — click "Advanced → Proceed" to continue, or consume the API from a script/backend (e.g. `curl`) where certificate warnings aren't an issue. For a browser-trusted certificate you would need a reverse proxy with a real TLS certificate (e.g. Let's Encrypt), which typically isn't available inside shared game-hosting containers.
+>
+> If your browser insists on redirecting plain `http://` requests to HTTPS on its own (HSTS), that's a browser/domain policy, not ExoMetric — use `curl`, an incognito window, or disable "Always use secure connections" for that check, or just use the HTTPS endpoint directly.
 
 ## 🔗 API Reference
 
