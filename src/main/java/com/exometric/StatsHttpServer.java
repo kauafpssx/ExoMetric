@@ -16,10 +16,9 @@ import java.net.InetSocketAddress;
 public class StatsHttpServer {
 
     private static HttpServer server;
-    private static int currentPort = -1;
-
     private static HttpsServer httpsServer;
-    private static int currentHttpsPort = -1;
+    private static int currentPort = -1;
+    private static boolean currentUseHttps = false;
 
     public static void start() {
         ConfigManager.Config config = ConfigManager.getConfig();
@@ -30,9 +29,30 @@ public class StatsHttpServer {
 
         if (config.api_port <= 0) {
             System.out.println("[ExoMetric] API port is not set (0). Please configure api_port in config/ExoMetric.json");
+            return;
+        }
+
+        currentPort = config.api_port;
+        currentUseHttps = config.api_use_https;
+
+        if (currentUseHttps) {
+            try {
+                File keystoreFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "exometric-ssl.p12");
+                SSLContext sslContext = CertUtil.getOrCreateSelfSignedContext(
+                        keystoreFile, config.api_https_keystore_password, "localhost");
+
+                httpsServer = HttpsServer.create(new InetSocketAddress(currentPort), 0);
+                httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+                httpsServer.createContext("/mc-stats", new MyHandler());
+                httpsServer.setExecutor(null);
+                httpsServer.start();
+                System.out.println("[ExoMetric] HTTPS API Server started on port " + currentPort
+                        + " (self-signed certificate; browsers will show a security warning)");
+            } catch (Exception e) {
+                System.err.println("[ExoMetric] Failed to start HTTPS API Server: " + e.getMessage());
+            }
         } else {
             try {
-                currentPort = config.api_port;
                 server = HttpServer.create(new InetSocketAddress(currentPort), 0);
                 server.createContext("/mc-stats", new MyHandler());
                 server.setExecutor(null);
@@ -41,36 +61,6 @@ public class StatsHttpServer {
             } catch (IOException e) {
                 System.err.println("[ExoMetric] Failed to start API Server: " + e.getMessage());
             }
-        }
-
-        startHttps(config);
-    }
-
-    private static void startHttps(ConfigManager.Config config) {
-        if (!config.api_https_enabled) {
-            return;
-        }
-
-        if (config.api_https_port <= 0) {
-            System.out.println("[ExoMetric] api_https_port is not set (0). Please configure api_https_port in config/ExoMetric.json");
-            return;
-        }
-
-        try {
-            File keystoreFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "exometric-ssl.p12");
-            SSLContext sslContext = CertUtil.getOrCreateSelfSignedContext(
-                    keystoreFile, config.api_https_keystore_password, "localhost");
-
-            currentHttpsPort = config.api_https_port;
-            httpsServer = HttpsServer.create(new InetSocketAddress(currentHttpsPort), 0);
-            httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
-            httpsServer.createContext("/mc-stats", new MyHandler());
-            httpsServer.setExecutor(null);
-            httpsServer.start();
-            System.out.println("[ExoMetric] HTTPS API Server started on port " + currentHttpsPort
-                    + " (self-signed certificate; browsers will show a security warning)");
-        } catch (Exception e) {
-            System.err.println("[ExoMetric] Failed to start HTTPS API Server: " + e.getMessage());
         }
     }
 
@@ -90,11 +80,13 @@ public class StatsHttpServer {
     public static void reload() {
         ConfigManager.Config config = ConfigManager.getConfig();
 
-        boolean httpChanged = server == null || config.api_port != currentPort || !config.api_enabled;
-        boolean httpsChanged = (httpsServer == null) != !config.api_https_enabled
-                || config.api_https_port != currentHttpsPort;
+        boolean running = server != null || httpsServer != null;
+        boolean changed = !running
+                || config.api_port != currentPort
+                || config.api_use_https != currentUseHttps
+                || !config.api_enabled;
 
-        if (httpChanged || httpsChanged) {
+        if (changed) {
             stop();
             if (config.api_enabled) {
                 start();

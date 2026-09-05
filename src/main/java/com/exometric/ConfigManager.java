@@ -21,8 +21,7 @@ public class ConfigManager {
         public int api_port = 0; // 0 significa que o usuário precisa configurar
         public String api_token = "";
 
-        public boolean api_https_enabled = false;
-        public int api_https_port = 0; // 0 significa que o usuário precisa configurar
+        public boolean api_use_https = false; // false = HTTP, true = HTTPS (mesma api_port)
         public String api_https_keystore_password = "";
         
         // Comentários simulados via campos se necessário, mas JSON padrão não suporta.
