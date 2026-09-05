@@ -175,8 +175,9 @@ public class MetricsCollector {
                 ServerLevel overworld = activeServer.overworld();
                 if (overworld != null) {
                     data.worldSeed = overworld.getSeed();
-                    data.worldTime = overworld.getDayTime();
-                    data.worldDay = overworld.getDayTime() / 24000L;
+                    long dayTime = (Long) invokeAny(overworld, "getDayTime", "getOverworldClockTime", "getDefaultClockTime", "getGameTime");
+                    data.worldTime = dayTime;
+                    data.worldDay = dayTime / 24000L;
                     data.isRaining = overworld.isRaining();
                 }
                 data.difficulty = activeServer.getWorldData().getDifficulty().getSerializedName();
@@ -190,8 +191,11 @@ public class MetricsCollector {
 
     private static String getDimensionSafe(ServerPlayer player) {
         try {
-            // Tenta o método direto primeiro
-            return player.level().dimension().location().toString();
+            // dimension()/location() (or its renamed equivalent identifier()) can vary between
+            // mapping sets, so resolve both hops via reflection to survive renames.
+            Object dimKey = invokeAny(player.level(), "dimension");
+            Object ident = invokeAny(dimKey, "location", "identifier");
+            return ident.toString();
         } catch (Throwable t) {
             try {
                 // Tenta via reflection buscando QUALQUER método que retorne um objeto tipo Level/ServerLevel
@@ -201,11 +205,8 @@ public class MetricsCollector {
                         if (ret.getName().endsWith("Level") || ret.getName().endsWith("ServerLevel")) {
                             Object level = m.invoke(player);
                             if (level != null) {
-                                // Usa reflexão para pegar a dimension key do mundo retornado
-                                Method getDim = level.getClass().getMethod("dimension");
-                                Object dimKey = getDim.invoke(level);
-                                Method getLoc = dimKey.getClass().getMethod("location");
-                                Object ident = getLoc.invoke(dimKey);
+                                Object dimKey = invokeAny(level, "dimension");
+                                Object ident = invokeAny(dimKey, "location", "identifier");
                                 return ident.toString();
                             }
                         }
@@ -214,6 +215,19 @@ public class MetricsCollector {
             } catch (Throwable t2) {}
         }
         return "minecraft:overworld";
+    }
+
+    private static Object invokeAny(Object target, String... methodNames) throws Exception {
+        Exception last = null;
+        for (String name : methodNames) {
+            try {
+                Method m = target.getClass().getMethod(name);
+                return m.invoke(target);
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        throw last;
     }
 
     private static MetricsData.ItemData convertItem(ItemStack stack, int slot) {
@@ -229,8 +243,12 @@ public class MetricsCollector {
     private static String getSkinIdentifierFromProfile(ServerPlayer player) {
         try {
             GameProfile profile = player.getGameProfile();
-            Collection<Property> textures = profile.getProperties().get("textures");
-            
+            // properties()/getProperties() varies between authlib versions, so resolve via reflection.
+            Object propertyMap = invokeAny(profile, "getProperties", "properties");
+            Method get = propertyMap.getClass().getMethod("get", Object.class);
+            @SuppressWarnings("unchecked")
+            Collection<Property> textures = (Collection<Property>) get.invoke(propertyMap, "textures");
+
             for (Property property : textures) {
                 String value = property.value();
                 if (value == null || value.isEmpty()) continue;
