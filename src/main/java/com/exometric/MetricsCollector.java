@@ -1,11 +1,11 @@
 package com.exometric;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.world.World;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.Level;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import java.util.Collection;
@@ -82,32 +82,32 @@ public class MetricsCollector {
             data.heapUsedBytes = data.heapMaxBytes - Runtime.getRuntime().freeMemory();
 
             if (activeServer != null) {
-                data.playersOnline = activeServer.getPlayerManager().getPlayerList().size();
-                
-                for (ServerPlayerEntity player : activeServer.getPlayerManager().getPlayerList()) {
+                data.playersOnline = activeServer.getPlayerList().getPlayers().size();
+
+                for (ServerPlayer player : activeServer.getPlayerList().getPlayers()) {
                     try {
                         MetricsData.PlayerData pd = new MetricsData.PlayerData();
-                        
+
                         pd.name = player.getName().getString();
-                        pd.uuid = player.getUuidAsString();
-                        
+                        pd.uuid = player.getStringUUID();
+
                         try {
-                            pd.ping = player.networkHandler.getLatency();
+                            pd.ping = player.connection.latency();
                         } catch (Throwable t) { pd.ping = 0; }
-                        
+
                         // FIX: Safe dimension retrieval to avoid NoSuchMethodError
                         pd.dimension = getDimensionSafe(player);
-                        
+
                         try {
-                            pd.gamemode = player.interactionManager.getGameMode().getName().toUpperCase();
+                            pd.gamemode = player.gameMode.getGameModeForPlayer().getName().toUpperCase();
                         } catch (Throwable t) { pd.gamemode = "SURVIVAL"; }
-                        
+
                         pd.level = player.experienceLevel;
                         pd.health = player.getHealth();
-                        
+
                         try {
-                            pd.food = player.getHungerManager().getFoodLevel();
-                            pd.saturation = player.getHungerManager().getSaturationLevel();
+                            pd.food = player.getFoodData().getFoodLevel();
+                            pd.saturation = player.getFoodData().getSaturationLevel();
                         } catch (Throwable t) {
                             pd.food = 20;
                             pd.saturation = 5.0f;
@@ -116,9 +116,9 @@ public class MetricsCollector {
                         pd.x = player.getX();
                         pd.y = player.getY();
                         pd.z = player.getZ();
-                        
+
                         // Tempo Online
-                        UUID u = player.getUuid();
+                        UUID u = player.getUUID();
                         if (!loginTimes.containsKey(u)) {
                             loginTimes.put(u, System.currentTimeMillis());
                         }
@@ -126,38 +126,38 @@ public class MetricsCollector {
 
                         // Skin / Avatar
                         String skinIdentifier = getSkinIdentifierFromProfile(player);
-                        if (skinIdentifier == null) skinIdentifier = player.getUuidAsString();
+                        if (skinIdentifier == null) skinIdentifier = player.getStringUUID();
                         pd.avatar_url = "https://mc-heads.net/avatar/" + skinIdentifier + "/64";
-                        
+
                         // Itens nas mãos
-                        pd.mainHand = convertItem(player.getMainHandStack(), -1);
-                        pd.offHand = convertItem(player.getOffHandStack(), 40);
-                        
+                        pd.mainHand = convertItem(player.getMainHandItem(), -1);
+                        pd.offHand = convertItem(player.getOffhandItem(), 40);
+
                         // Hotbar (0-8)
                         for (int i = 0; i < 9; i++) {
-                            ItemStack stack = player.getInventory().getStack(i);
+                            ItemStack stack = player.getInventory().getItem(i);
                             if (!stack.isEmpty()) pd.hotbar.add(convertItem(stack, i));
                         }
-                        
+
                         // Main Inventory (9-35)
                         for (int i = 9; i < 36; i++) {
-                            ItemStack stack = player.getInventory().getStack(i);
+                            ItemStack stack = player.getInventory().getItem(i);
                             if (!stack.isEmpty()) pd.mainInventory.add(convertItem(stack, i));
                         }
-                        
+
                         // Armor (36-39)
                         for (int i = 36; i < 40; i++) {
-                            ItemStack stack = player.getInventory().getStack(i);
+                            ItemStack stack = player.getInventory().getItem(i);
                             if (!stack.isEmpty()) pd.armor.add(convertItem(stack, i));
                         }
-                        
+
                         data.players.add(pd);
                     } catch (Throwable pt) {
                         pt.printStackTrace();
                     }
                 }
-                
-                loginTimes.keySet().removeIf(id -> activeServer.getPlayerManager().getPlayer(id) == null);
+
+                loginTimes.keySet().removeIf(id -> activeServer.getPlayerList().getPlayer(id) == null);
 
                 // TPS
                 long total = 0;
@@ -169,17 +169,17 @@ public class MetricsCollector {
 
                 // World stats
                 int chunks = 0;
-                for (ServerWorld w : activeServer.getWorlds()) chunks += w.getChunkManager().getLoadedChunkCount();
+                for (ServerLevel w : activeServer.getAllLevels()) chunks += w.getChunkSource().getLoadedChunksCount();
                 data.loadedChunks = chunks;
 
-                ServerWorld overworld = activeServer.getOverworld();
+                ServerLevel overworld = activeServer.overworld();
                 if (overworld != null) {
                     data.worldSeed = overworld.getSeed();
-                    data.worldTime = overworld.getTimeOfDay();
-                    data.worldDay = overworld.getTimeOfDay() / 24000L;
+                    data.worldTime = overworld.getDayTime();
+                    data.worldDay = overworld.getDayTime() / 24000L;
                     data.isRaining = overworld.isRaining();
                 }
-                data.difficulty = activeServer.getSaveProperties().getDifficulty().getName();
+                data.difficulty = activeServer.getWorldData().getDifficulty().getSerializedName();
             }
         } catch (Throwable t) {
             t.printStackTrace();
@@ -188,24 +188,24 @@ public class MetricsCollector {
         cachedMetrics = data;
     }
 
-    private static String getDimensionSafe(ServerPlayerEntity player) {
+    private static String getDimensionSafe(ServerPlayer player) {
         try {
             // Tenta o método direto primeiro
-            return player.getWorld().getRegistryKey().getValue().toString();
+            return player.level().dimension().location().toString();
         } catch (Throwable t) {
             try {
-                // Tenta via reflection buscando QUALQUER método que retorne um objeto tipo World/ServerWorld
+                // Tenta via reflection buscando QUALQUER método que retorne um objeto tipo Level/ServerLevel
                 for (Method m : player.getClass().getMethods()) {
                     if (m.getParameterCount() == 0) {
                         Class<?> ret = m.getReturnType();
-                        if (ret.getName().endsWith("World") || ret.getName().endsWith("ServerWorld")) {
-                            Object world = m.invoke(player);
-                            if (world != null) {
-                                // Usa reflexão para pegar a RegistryKey do mundo retornado
-                                Method getReg = world.getClass().getMethod("getRegistryKey");
-                                Object regKey = getReg.invoke(world);
-                                Method getVal = regKey.getClass().getMethod("getValue");
-                                Object ident = getVal.invoke(regKey);
+                        if (ret.getName().endsWith("Level") || ret.getName().endsWith("ServerLevel")) {
+                            Object level = m.invoke(player);
+                            if (level != null) {
+                                // Usa reflexão para pegar a dimension key do mundo retornado
+                                Method getDim = level.getClass().getMethod("dimension");
+                                Object dimKey = getDim.invoke(level);
+                                Method getLoc = dimKey.getClass().getMethod("location");
+                                Object ident = getLoc.invoke(dimKey);
                                 return ident.toString();
                             }
                         }
@@ -219,14 +219,14 @@ public class MetricsCollector {
     private static MetricsData.ItemData convertItem(ItemStack stack, int slot) {
         if (stack == null || stack.isEmpty()) return null;
         MetricsData.ItemData item = new MetricsData.ItemData();
-        item.id = Registries.ITEM.getId(stack.getItem()).toString();
+        item.id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         item.count = stack.getCount();
         item.slot = slot;
-        item.name = stack.getName().getString();
+        item.name = stack.getHoverName().getString();
         return item;
     }
 
-    private static String getSkinIdentifierFromProfile(ServerPlayerEntity player) {
+    private static String getSkinIdentifierFromProfile(ServerPlayer player) {
         try {
             GameProfile profile = player.getGameProfile();
             Collection<Property> textures = profile.getProperties().get("textures");
